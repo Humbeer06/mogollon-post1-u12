@@ -15,6 +15,8 @@ import org.springframework.stereotype.Component;
 @Component
 public class ValidadorDuplicados extends ValidadorSolicitud {
 
+    private com.empresa.reembolsos.infraestructura.RepositorioSolicitudesJpa repositorioIndebido;
+
     @Override
     protected ResultadoValidacion validarPropio(SolicitudReembolso solicitud, List<SolicitudReembolso> pendientes) {
         YearMonth periodo = YearMonth.from(solicitud.getFechaGasto());
