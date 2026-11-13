@@ -1,0 +1,26 @@
+Salida local:
+$ mvn test -Dtest=ReglasArquitectura
+[ERROR] Tests run: 4, Failures: 1, Errors: 0, Skipped: 0, Time elapsed: 5.422 s <<< FAILURE! -- in com.empresa.reembolsos.ReglasArquitectura
+[ERROR] com.empresa.reembolsos.ReglasArquitectura.procesamientoNoDependeDePersistenciaNiDeLaCapaWeb -- Time elapsed: 5.367 s <<< FAILURE!
+java.lang.AssertionError: 
+Architecture Violation [Priority: MEDIUM] - Rule 'no classes that reside in a package '..procesamiento..' should depend on classes that reside in any package ['..infraestructura..', '..adaptadores..', 'org.springframework.data..', 'jakarta.persistence..']' was violated (1 times):
+Field <com.empresa.reembolsos.procesamiento.validacion.ValidadorDuplicados.repositorioIndebido> has type <com.empresa.reembolsos.infraestructura.RepositorioSolicitudesJpa> in (ValidadorDuplicados.java:0)
+...
+[ERROR] Failures: 
+[ERROR]   ReglasArquitectura.procesamientoNoDependeDePersistenciaNiDeLaCapaWeb Architecture Violation [Priority: MEDIUM] - Rule 'no classes that reside in a package '..procesamiento..' should depend on classes that reside in any package ['..infraestructura..', '..adaptadores..', 'org.springframework.data..', 'jakarta.persistence..']' was violated (1 times):
+Field <com.empresa.reembolsos.procesamiento.validacion.ValidadorDuplicados.repositorioIndebido> has type <com.empresa.reembolsos.infraestructura.RepositorioSolicitudesJpa> in (ValidadorDuplicados.java:0)
+[INFO] 
+[ERROR] Tests run: 4, Failures: 1, Errors: 0, Skipped: 0
+[INFO] 
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD FAILURE
+
+Misma violacion en el job 'arquitectura' de GitHub Actions (run 43393348165, paso 'Ejecutar reglas de arquitectura'):
+[ERROR] Tests run: 4, Failures: 1, Errors: 0, Skipped: 0, Time elapsed: 1.521 s <<< FAILURE! -- in com.empresa.reembolsos.ReglasArquitectura
+[ERROR] com.empresa.reembolsos.ReglasArquitectura.procesamientoNoDependeDePersistenciaNiDeLaCapaWeb -- Time elapsed: 1.503 s <<< FAILURE!
+Architecture Violation [Priority: MEDIUM] - Rule 'no classes that reside in a package '..procesamiento..' should depend on classes that reside in any package ['..infraestructura..', '..adaptadores..', 'org.springframework.data..', 'jakarta.persistence..']' was violated (1 times):
+Field <com.empresa.reembolsos.procesamiento.validacion.ValidadorDuplicados.repositorioIndebido> has type <com.empresa.reembolsos.infraestructura.RepositorioSolicitudesJpa> in (ValidadorDuplicados.java:0)
+[ERROR]   ReglasArquitectura.procesamientoNoDependeDePersistenciaNiDeLaCapaWeb Architecture Violation [Priority: MEDIUM] - Rule 'no classes that reside in a package '..procesamiento..' should depend on classes that reside in any package ['..infraestructura..', '..adaptadores..', 'org.springframework.data..', 'jakarta.persistence..']' was violated (1 times):
+Field <com.empresa.reembolsos.procesamiento.validacion.ValidadorDuplicados.repositorioIndebido> has type <com.empresa.reembolsos.infraestructura.RepositorioSolicitudesJpa> in (ValidadorDuplicados.java:0)
+[ERROR] Tests run: 4, Failures: 1, Errors: 0, Skipped: 0
+[INFO] BUILD FAILURE

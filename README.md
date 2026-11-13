@@ -160,6 +160,69 @@ Criterio: ¿la variabilidad que justificaría la alternativa es real y documenta
 - **Por qué se descartó:** son tres categorías con topes estables que Finanzas no ha pedido cambiar sin despliegue; centralizar ahora acoplaría `validacion` con `calculo` o añadiría una capa de configuración sin un cambio real que la exija. La duplicación de constantes es una deuda conocida y pequeña.
 - **Señal para reconsiderar:** agregar la cuarta categoría («bienestar»), que ya exigiría tocar el validador además de crear su calculadora, o un pedido de Finanzas de cambiar topes sin redesplegar.
 
+## Evidencia del pipeline
+
+Se introdujo una violación intencional de la Regla 1 (commit `51f246f`): un campo de tipo `RepositorioSolicitudesJpa` en `ValidadorDuplicados` (un `import` sin uso no basta: ArchUnit analiza bytecode y el compilador lo descarta). El job `arquitectura` falló; luego se revirtió (commit `6cf45cf`) y volvió a pasar.
+
+| Commit | Resultado en GitHub Actions |
+|---|---|
+| `aefeb5b` — docs: documentar analisis de impacto y patrones descartados por sobreingenieria | ✅ pasó ([run 43393091486](https://github.com/Humbeer06/mogollon-post1-u12/actions/runs/43393091486)) |
+| `51f246f` — test: violacion de arquitectura intencional | ❌ falló ([run 43393348165](https://github.com/Humbeer06/mogollon-post1-u12/actions/runs/43393348165)) |
+| `6cf45cf` — Revert "test: violacion de arquitectura intencional" | ✅ pasó ([run 43393690504](https://github.com/Humbeer06/mogollon-post1-u12/actions/runs/43393690504)) |
+
+**Build fallido por la violación** — [https://github.com/Humbeer06/mogollon-post1-u12/actions/runs/43393348165](https://github.com/Humbeer06/mogollon-post1-u12/actions/runs/43393348165)
+
+![Build fallido por la violacion de la Regla 1](docs/evidencia/actions-fallido.png)
+
+Salida de ArchUnit en ese job:
+
+```
+Salida local:
+$ mvn test -Dtest=ReglasArquitectura
+[ERROR] Tests run: 4, Failures: 1, Errors: 0, Skipped: 0, Time elapsed: 5.422 s <<< FAILURE! -- in com.empresa.reembolsos.ReglasArquitectura
+[ERROR] com.empresa.reembolsos.ReglasArquitectura.procesamientoNoDependeDePersistenciaNiDeLaCapaWeb -- Time elapsed: 5.367 s <<< FAILURE!
+java.lang.AssertionError: 
+Architecture Violation [Priority: MEDIUM] - Rule 'no classes that reside in a package '..procesamiento..' should depend on classes that reside in any package ['..infraestructura..', '..adaptadores..', 'org.springframework.data..', 'jakarta.persistence..']' was violated (1 times):
+Field <com.empresa.reembolsos.procesamiento.validacion.ValidadorDuplicados.repositorioIndebido> has type <com.empresa.reembolsos.infraestructura.RepositorioSolicitudesJpa> in (ValidadorDuplicados.java:0)
+...
+[ERROR] Failures: 
+[ERROR]   ReglasArquitectura.procesamientoNoDependeDePersistenciaNiDeLaCapaWeb Architecture Violation [Priority: MEDIUM] - Rule 'no classes that reside in a package '..procesamiento..' should depend on classes that reside in any package ['..infraestructura..', '..adaptadores..', 'org.springframework.data..', 'jakarta.persistence..']' was violated (1 times):
+Field <com.empresa.reembolsos.procesamiento.validacion.ValidadorDuplicados.repositorioIndebido> has type <com.empresa.reembolsos.infraestructura.RepositorioSolicitudesJpa> in (ValidadorDuplicados.java:0)
+[INFO] 
+[ERROR] Tests run: 4, Failures: 1, Errors: 0, Skipped: 0
+[INFO] 
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD FAILURE
+
+Misma violacion en el job 'arquitectura' de GitHub Actions (run 43393348165, paso 'Ejecutar reglas de arquitectura'):
+[ERROR] Tests run: 4, Failures: 1, Errors: 0, Skipped: 0, Time elapsed: 1.521 s <<< FAILURE! -- in com.empresa.reembolsos.ReglasArquitectura
+[ERROR] com.empresa.reembolsos.ReglasArquitectura.procesamientoNoDependeDePersistenciaNiDeLaCapaWeb -- Time elapsed: 1.503 s <<< FAILURE!
+Architecture Violation [Priority: MEDIUM] - Rule 'no classes that reside in a package '..procesamiento..' should depend on classes that reside in any package ['..infraestructura..', '..adaptadores..', 'org.springframework.data..', 'jakarta.persistence..']' was violated (1 times):
+Field <com.empresa.reembolsos.procesamiento.validacion.ValidadorDuplicados.repositorioIndebido> has type <com.empresa.reembolsos.infraestructura.RepositorioSolicitudesJpa> in (ValidadorDuplicados.java:0)
+[ERROR]   ReglasArquitectura.procesamientoNoDependeDePersistenciaNiDeLaCapaWeb Architecture Violation [Priority: MEDIUM] - Rule 'no classes that reside in a package '..procesamiento..' should depend on classes that reside in any package ['..infraestructura..', '..adaptadores..', 'org.springframework.data..', 'jakarta.persistence..']' was violated (1 times):
+Field <com.empresa.reembolsos.procesamiento.validacion.ValidadorDuplicados.repositorioIndebido> has type <com.empresa.reembolsos.infraestructura.RepositorioSolicitudesJpa> in (ValidadorDuplicados.java:0)
+[ERROR] Tests run: 4, Failures: 1, Errors: 0, Skipped: 0
+[INFO] BUILD FAILURE
+```
+
+**Build en verde tras el revert** — [https://github.com/Humbeer06/mogollon-post1-u12/actions/runs/43393690504](https://github.com/Humbeer06/mogollon-post1-u12/actions/runs/43393690504)
+
+![Build en verde tras revertir la violacion](docs/evidencia/actions-verde.png)
+
+## Ajustes respecto a la guía
+
+Se detectaron los siguientes problemas en el material y se resolvieron así (cada uno cubierto por una prueba o una regla):
+
+1. **Tope de VIAJE.** La guía comparaba el monto contra 150.000 sin multiplicar por los días, mientras la calculadora aplica 150.000 × días. Con eso un viaje de 5 días con 600.000 (válido bajo RF2) se rechazaba y el tope diario × días de la calculadora nunca actuaba. `ValidadorMontoMaximo` usa ahora el tope diario por los días (`viajeLargoNoSeRechazaPorElTopeDeUnSoloDia`).
+2. **Periodo de duplicados.** La guía comparaba solo `getMonth()`; mayo de 2025 y mayo de 2026 contaban como el mismo periodo. Se compara `YearMonth` (`mismoMesDeOtroAnioNoCuentaComoDuplicado`).
+3. **Dominio y JPA.** La guía pide un dominio sin dependencias de JPA y a la vez un `JpaRepository<SolicitudReembolso, Long>`, que exige `@Entity`. El dominio se creó puro en el primer commit y recibió las anotaciones `jakarta.persistence` en el commit del repositorio; es la consecuencia negativa registrada en el ADR-001.
+4. **Reglas ArchUnit.** (a) `@AnalyzeClasses` excluye las clases de prueba (`DoNotIncludeTests`): `CalculadorasTest` vive en un paquete de `procesamiento.calculo` y violaría las reglas 3 y 4. (b) La regla 3 se restringe a clases cuyo nombre empieza por `Calculadora`: `SelectorCalculadora` vive en ese paquete y no es una calculadora. (c) La regla 2 admite el propio paquete `adaptadores.rest` (`ManejadorErrores` y el controlador se acceden entre sí).
+5. **Excepciones y errores HTTP.** La guía usa `SolicitudInvalidaException` sin definirla; se creó en `aplicacion` y `ManejadorErrores` la traduce a 400 con el motivo, y un id inexistente a 404.
+6. **Violación intencional.** Un `import` sin uso desaparece al compilar y ArchUnit no lo ve; se usa un campo.
+7. **Workflow.** Se usa `cache: maven` de `actions/setup-java@v4` en vez de `actions/cache@v3`, versión obsoleta.
+8. ArchUnit 1.3.0 (la guía sugiere 1.2.1; ambas son 1.x).
+9. Se añadieron validaciones defensivas (categoría nula, monto no positivo) y más pruebas que el mínimo de la guía.
+
 ## Cómo ejecutar
 
 ```bash
