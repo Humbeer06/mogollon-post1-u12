@@ -81,10 +81,11 @@ La Regla 1 prohíbe que `procesamiento` dependa de `infraestructura`, `adaptador
 
 ## Pruebas
 
-- **33 pruebas unitarias** (una o más por validador y por calculadora, más la cadena, el selector, los tres notificadores y el servicio con Mockito) y **1 clase de integración** `@SpringBootTest` (`ReembolsosIntegracionTest`) que recorre el flujo completo por la API REST con H2: creación en las tres categorías, rechazo sin documentos, rechazo de duplicado, aprobación que dispara a los tres observadores y 404 para un id inexistente.
-- **4 pruebas ArchUnit** (`ReglasArquitectura`).
+- **33 pruebas unitarias** (una o más por validador y por calculadora, más la cadena, el selector, los tres notificadores y el servicio con Mockito) y **1 clase de integración** `@SpringBootTest` (`ReembolsosIntegracionTest`, 6 pruebas) que recorre el flujo completo por la API REST con H2: creación en las tres categorías, rechazo sin documentos, rechazo de duplicado, aprobación que dispara a los tres observadores y 404 para un id inexistente.
+- **4 pruebas ArchUnit** (`ReglasArquitectura`): se agregan en la Parte 2 (ver «Reglas de arquitectura (ArchUnit)»), por eso no aparecen en la salida de abajo.
+- **Total con `mvn clean verify` al cierre: 43 pruebas** (33 unitarias + 6 de integración + 4 ArchUnit).
 
-Resultado de `mvn test` al cierre de la Parte 1:
+Resultado de `mvn test` al cierre de la Parte 1 (39 pruebas, todavía sin ArchUnit):
 
 ```
 [INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 1.384 s -- in com.empresa.reembolsos.aplicacion.SolicitudReembolsoServiceTest
@@ -222,11 +223,12 @@ Se detectaron los siguientes problemas en el material y se resolvieron así (cad
 7. **Workflow.** Se usa `cache: maven` de `actions/setup-java@v4` en vez de `actions/cache@v3`, versión obsoleta.
 8. ArchUnit 1.3.0 (la guía sugiere 1.2.1; ambas son 1.x).
 9. Se añadieron validaciones defensivas (categoría nula, monto no positivo) y más pruebas que el mínimo de la guía.
+10. **ArchUnit en `mvn verify`.** `ReglasArquitectura` no termina en `Test`, así que Surefire (que por defecto solo incluye `**/*Test.java`, `**/*Tests.java`, etc.) no la ejecutaba en `mvn verify`: solo corría con `-Dtest=ReglasArquitectura` (como hace el primer paso del workflow), y un `mvn verify` local pasaba aun con la violación intencional presente. Se agregó en el `pom.xml` un `<include>**/ReglasArquitectura.java</include>` en `maven-surefire-plugin` para que `verify` también valide la arquitectura: ahora ejecuta 43 pruebas (39 + 4 de ArchUnit).
 
 ## Cómo ejecutar
 
 ```bash
-mvn clean verify                       # compila y corre todas las pruebas
+mvn clean verify                       # compila y corre todas las pruebas (43, incluidas las 4 reglas ArchUnit)
 mvn test -Dtest=ReglasArquitectura     # solo las 4 reglas de arquitectura
 mvn spring-boot:run                    # API en http://localhost:8080
 ```
