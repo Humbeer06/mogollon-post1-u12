@@ -1,6 +1,8 @@
 # reembolsos-integrado — Sistema de Solicitudes de Reembolso de Gastos Corporativos
 
-Proyecto integrador de cierre (Unidad 12, Patrones de Diseño de Software). Spring Boot 3 / Java 17 / Maven. El área de Finanzas reemplaza su hoja de cálculo por un sistema que valida, calcula y notifica solicitudes de reembolso.
+Proyecto integrador de cierre (Unidad 12, Patrones de Diseño de Software). Spring Boot 3 / Java 17 / Maven. El área de Finanzas reemplaza su hoja de cálculo por un sistema que valida, calcula y notifica solicitudes de reembolso. Este README funciona como mini-documento de diseño: primero el análisis, luego la arquitectura resultante, las decisiones, el ADR y lo que se descartó.
+
+Fecha de ejecución: 2026-11-13 · Java: 22.0.2 (Oracle JDK; el proyecto compila con `java.version` 17) · Maven: 3.9.16
 
 ## Diseño Propuesto
 
@@ -19,3 +21,96 @@ Análisis hecho **antes de escribir código de patrones**. Para cada requisito s
 - **RF3.** Llamar a cada notificador desde el servicio acopla el servicio a cada interesado y exige editarlo con cada uno nuevo. Un bus de eventos de Spring es más indirección de la necesaria para tres observadores fijos (ver «Qué se descartó y por qué»).
 
 No se propone ningún patrón adicional: ningún requisito de la especificación lo pide.
+
+## Arquitectura resultante
+
+```mermaid
+flowchart LR
+    REST["adaptadores.rest<br/>SolicitudReembolsoController<br/>ManejadorErrores"] --> APP["aplicacion<br/>SolicitudReembolsoService"]
+    APP --> VAL["procesamiento.validacion<br/>Chain of Responsibility"]
+    APP --> CAL["procesamiento.calculo<br/>Strategy + Selector"]
+    APP --> NOT["procesamiento.notificacion<br/>Observer"]
+    APP --> INF["infraestructura<br/>RepositorioSolicitudesJpa"]
+    VAL --> DOM["dominio"]
+    CAL --> DOM
+    NOT --> DOM
+    INF --> DOM
+```
+
+- **dominio**: `SolicitudReembolso`, `CategoriaGasto`, `EstadoSolicitud`.
+- **procesamiento**: los tres patrones. No depende de infraestructura, adaptadores ni JPA (regla ArchUnit 1); los validadores y calculadoras se prueban con `new`, sin contenedor de Spring.
+- **aplicacion**: `SolicitudReembolsoService` es el único punto que coordina los tres patrones y el único que conoce el repositorio.
+- **infraestructura**: `RepositorioSolicitudesJpa` (Spring Data JPA, H2). Sin puerto intermedio (ADR-001).
+- **adaptadores.rest**: el controlador solo habla con el servicio de aplicación (regla ArchUnit 2).
+
+Flujo de `POST /api/solicitudes`: el servicio carga las pendientes del empleado → `CadenaValidadores` (documentos → monto → duplicados) → `SelectorCalculadora` elige la estrategia de la categoría → se guarda como `PENDIENTE`. Flujo de `PUT /api/solicitudes/{id}/estado`: se guarda el nuevo estado y se notifica a todos los `ObservadorCambioEstado` con el estado anterior.
+
+## Decisión de diseño 1 — Orden de la cadena de validadores
+
+**Orden elegido:** documentos soporte → monto máximo → duplicados.
+
+**Criterio de eficiencia.** `ValidadorDuplicados` es el eslabón más caro: recorre la lista de solicitudes pendientes y compara categoría y periodo (año y mes) con cada una. `ValidadorDocumentosSoporte` lee un booleano y `ValidadorMontoMaximo` hace una comparación. Como la cadena se detiene en el primer rechazo, poner primero los eslabones baratos significa que las solicitudes sin documentos o con monto excedido (rechazos que no necesitan consultar nada más) nunca llegan a recorrer la lista. La prueba `CadenaValidadoresTest.elEslabonDeDuplicadosNoSeEjecutaSiYaFallaUnoAnterior` lo demuestra con una lista que lanza excepción si se la recorre.
+
+**Qué se gana:** el costo del eslabón caro solo se paga cuando la solicitud ya superó las verificaciones baratas. **Qué se pierde:** con duplicados al final, una solicitud con dos problemas solo informa el primero (el empleado corrige y reintenta); con duplicados primero, el error visible sería otro. Y si duplicados fuera primero, *toda* solicitud pagaría el recorrido, incluso las que se van a rechazar por falta de documentos.
+
+**Matiz honesto:** el ahorro real es acotado. El servicio carga las pendientes de la base de datos *antes* de invocar la cadena, de modo que esa consulta se paga siempre, sin importar el orden; lo que el orden evita es el recorrido en memoria, barato mientras un empleado tenga pocas pendientes. Un ahorro mayor exigiría cargar la lista de forma diferida (ver «Qué se descartó y por qué»).
+
+## Decisión de diseño 2 — Mapa inyectado frente a `switch` para elegir la calculadora
+
+**Elegido:** `SelectorCalculadora` construye un `Map<CategoriaGasto, CalculadoraReembolso>` a partir de la `List<CalculadoraReembolso>` que Spring inyecta con todos los `@Component` registrados.
+
+**Justificación con el RF2.** Finanzas planea categorías nuevas «sin modificar el cálculo de las categorías existentes». Con el mapa, la categoría nueva es una clase `@Component` nueva: ni `SelectorCalculadora` ni las tres calculadoras existentes cambian una sola línea. Con un `switch` manual habría que editar el método selector (código ya escrito y probado) con cada categoría, y un caso olvidado compilaría y fallaría en ejecución. El mapa además da un error explícito si falta una calculadora (`Categoria no soportada: X`) y detecta categorías duplicadas al arrancar (`toMap` lanza excepción).
+
+**Límite que conviene decir:** agregar «bienestar» tampoco es completamente gratis: exige la constante en `CategoriaGasto` (dominio) y una entrada de tope en `ValidadorMontoMaximo`. Es un punto de modificación oculto, documentado en «Qué se descartó y por qué» (centralizar los topes).
+
+## Decisión de diseño 3 y ADR-001 — Resumen
+
+Documento completo: [`docs/adr/ADR-001.md`](docs/adr/ADR-001.md) (estado: aceptado, 2026-11-13).
+
+- **Decisión 3a — Persistencia:** capas simples; `SolicitudReembolsoService` depende directamente de `RepositorioSolicitudesJpa`. No hay plan de cambiar de motor de base de datos, hay un solo repositorio y un puerto sería una abstracción especulativa (YAGNI). El criterio de la Guía (6.2: sistemas que sobrevivirán 3 años o más *con cambios de infraestructura*) no se cumple hoy para la persistencia.
+- **Decisión 3b — Notificación:** sin cambios. `ObservadorCambioEstado` ya es el seam: el sistema externo de Contabilidad del próximo trimestre se integra reemplazando por dentro `NotificadorContabilidad`, y el panel de métricas es un observador más. Para la notificación el criterio sí se cumple (hay un cambio de infraestructura con fecha) y ya está cubierto sin un puerto nuevo.
+- **Consecuencia negativa aceptada:** la entidad lleva anotaciones `jakarta.persistence` porque el repositorio JPA trabaja directo sobre ella.
+
+La respuesta es distinta para cada dependencia, como pedía la evaluación: persistencia no justifica Hexagonal hoy; notificación ya tiene el punto de extensión.
+
+## Decisión de diseño 4 — Qué prohíbe la Regla 1 de ArchUnit y por qué
+
+La Regla 1 prohíbe que `procesamiento` dependa de `infraestructura`, `adaptadores`, `org.springframework.data..` y `jakarta.persistence..`, pero **permite** `org.springframework.stereotype.Component`.
+
+**Justificación.** `@Component` es una anotación de estereotipo: solo marca la clase para que el contenedor la registre y no introduce ninguna dependencia de comportamiento. Una clase con `@Component` sigue siendo un objeto plano que se instancia con `new` (los tests de validadores, calculadoras y notificadores lo hacen, sin contenedor). En cambio una dependencia de Spring Data o JPA ata el paquete a una tecnología de acceso a datos, impide probarlo sin base de datos o sin contenedor, e invierte la dirección de las capas (el procesamiento de negocio pasaría a conocer cómo se persiste). Prohibir *cualquier* `org.springframework` obligaría a quitar `@Component` y a registrar cada patrón en una clase de configuración: más código y más lugares que modificar al agregar un validador, calculadora u observador, y perdería el registro automático que sostiene la decisión de diseño 2. La regla debe medir el acoplamiento que de verdad duele (datos y web), no el que es solo etiqueta. Por la misma razón se acepta `org.slf4j` en `NotificadorAuditoria`: es una dependencia transversal de logging.
+
+## Pruebas
+
+- **33 pruebas unitarias** (una o más por validador y por calculadora, más la cadena, el selector, los tres notificadores y el servicio con Mockito) y **1 clase de integración** `@SpringBootTest` (`ReembolsosIntegracionTest`) que recorre el flujo completo por la API REST con H2: creación en las tres categorías, rechazo sin documentos, rechazo de duplicado, aprobación que dispara a los tres observadores y 404 para un id inexistente.
+- **4 pruebas ArchUnit** (`ReglasArquitectura`).
+
+Resultado de `mvn test` al cierre de la Parte 1:
+
+```
+[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 1.384 s -- in com.empresa.reembolsos.aplicacion.SolicitudReembolsoServiceTest
+[INFO] Tests run: 8, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.025 s -- in com.empresa.reembolsos.procesamiento.calculo.CalculadorasTest
+[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.032 s -- in com.empresa.reembolsos.procesamiento.notificacion.NotificadoresTest
+[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.012 s -- in com.empresa.reembolsos.procesamiento.validacion.CadenaValidadoresTest
+[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.009 s -- in com.empresa.reembolsos.procesamiento.validacion.ValidadorDocumentosSoporteTest
+[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.011 s -- in com.empresa.reembolsos.procesamiento.validacion.ValidadorDuplicadosTest
+[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.013 s -- in com.empresa.reembolsos.procesamiento.validacion.ValidadorMontoMaximoTest
+[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 6.726 s -- in com.empresa.reembolsos.ReembolsosIntegracionTest
+[INFO] Tests run: 39, Failures: 0, Errors: 0, Skipped: 0
+[INFO] BUILD SUCCESS
+```
+
+## Cómo ejecutar
+
+```bash
+mvn clean verify                       # compila y corre todas las pruebas
+mvn test -Dtest=ReglasArquitectura     # solo las 4 reglas de arquitectura
+mvn spring-boot:run                    # API en http://localhost:8080
+```
+
+Ejemplo (PowerShell):
+
+```powershell
+$body = '{"empleadoId":"E-1","categoria":"VIAJE","montoSolicitado":300000,"fechaGasto":"2026-03-10","diasViaje":3,"documentosSoporte":true}'
+Invoke-RestMethod -Method Post -Uri http://localhost:8080/api/solicitudes -ContentType 'application/json' -Body $body
+Invoke-RestMethod -Method Put -Uri http://localhost:8080/api/solicitudes/1/estado -ContentType 'application/json' -Body '"APROBADA"'
+```
