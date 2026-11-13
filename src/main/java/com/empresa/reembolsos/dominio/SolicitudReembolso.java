@@ -1,19 +1,34 @@
 package com.empresa.reembolsos.dominio;
 
+import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 
-/** Solicitud de reembolso de un gasto corporativo. Modelo de dominio sin dependencias de frameworks. */
+/**
+ * Solicitud de reembolso de un gasto corporativo.
+ * Desde el commit del servicio y el repositorio JPA la clase lleva anotaciones de jakarta.persistence:
+ * consecuencia directa de la decision de capas simples (ver ADR-001).
+ */
+@Entity
 public class SolicitudReembolso {
 
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
     private String empleadoId;
+    @Enumerated(EnumType.STRING)
     private CategoriaGasto categoria;
     private BigDecimal montoSolicitado;
     private BigDecimal montoAprobado;
     private LocalDate fechaGasto;
     private int diasViaje;
     private boolean documentosSoporte;
+    @Enumerated(EnumType.STRING)
     private EstadoSolicitud estado;
 
     public Long getId() { return id; }
