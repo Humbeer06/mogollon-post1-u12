@@ -99,6 +99,67 @@ Resultado de `mvn test` al cierre de la Parte 1:
 [INFO] BUILD SUCCESS
 ```
 
+## Reglas de arquitectura (ArchUnit)
+
+`ReglasArquitectura` verifica los límites que sí existen (ninguna regla asume puertos de persistencia, coherente con ADR-001): `procesamientoNoDependeDePersistenciaNiDeLaCapaWeb`, `controladorRestSoloUsaServicioDeAplicacionYDominio`, `calculadorasImplementanLaInterfazDeEstrategia`, `notificadoresImplementanLaInterfazDeObservador`.
+
+```
+$ mvn test -Dtest=ReglasArquitectura
+[INFO] -------------------------------------------------------
+[INFO]  T E S T S
+[INFO] -------------------------------------------------------
+[INFO] Running com.empresa.reembolsos.ReglasArquitectura
+[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 2.288 s -- in com.empresa.reembolsos.ReglasArquitectura
+[INFO] 
+[INFO] Results:
+[INFO] 
+[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0
+[INFO] 
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD SUCCESS
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  9.609 s
+[INFO] Finished at: 2026-11-13T03:24:11-05:00
+[INFO] ------------------------------------------------------------------------
+
+Reglas ejecutadas (target/surefire-reports/TEST-com.empresa.reembolsos.ReglasArquitectura.xml):
+  [OK] procesamientoNoDependeDePersistenciaNiDeLaCapaWeb
+  [OK] controladorRestSoloUsaServicioDeAplicacionYDominio
+  [OK] calculadorasImplementanLaInterfazDeEstrategia
+  [OK] notificadoresImplementanLaInterfazDeObservador
+```
+
+El workflow `.github/workflows/arquitectura.yml` ejecuta primero las reglas y luego la suite completa en cada push y pull request a `main`.
+
+## Qué se descartó y por qué
+
+Criterio: ¿la variabilidad que justificaría la alternativa es real y documentada hoy, o es especulación sobre un futuro que aún no llegó? (Guía 4.2: YAGNI, Rule of Three; Guía 1.2: test de explicabilidad). Cada descarte es una decisión **vigente hoy**, no definitiva: se indica la señal que haría reconsiderarla.
+
+### 1. `ApplicationEventPublisher` en vez de la lista de observadores inyectada
+- **Qué se consideró:** publicar un evento de dominio con `ApplicationEventPublisher` y `@EventListener`, en lugar de inyectar `List<ObservadorCambioEstado>` en el servicio.
+- **Por qué se descartó:** con exactamente tres observadores fijos y conocidos en compilación, el bus genérico no aporta desacoplamiento real (ya lo da la interfaz `ObservadorCambioEstado`) y sí dificulta rastrear quién reacciona a qué cambio, el costo de depuración que advierte la propia Guía sobre Observer con eventos. Pasa el test de explicabilidad al revés: no hay una oración que justifique el bus.
+- **Señal para reconsiderar:** que los observadores deban ejecutarse de forma asíncrona o después del commit de la transacción, o que aparezcan observadores en otros módulos o servicios.
+
+### 2. Visitor o Abstract Factory para exportar reportes en varios formatos
+- **Qué se consideró:** anticipar que Contabilidad pediría exportar el historial en PDF y Excel además de CSV y construir una jerarquía de exportadores desde ahora.
+- **Por qué se descartó:** hoy solo existe el requisito de CSV; no hay una segunda solicitud real de otro formato, así que no se cumple la Rule of Three (Guía 4.2). Sería resolver un problema que todavía no existe.
+- **Señal para reconsiderar:** una segunda solicitud real de formato (la tercera confirmaría el patrón).
+
+### 3. Patrón State para `EstadoSolicitud` (propio)
+- **Qué se consideró:** modelar cada estado (PENDIENTE, APROBADA, RECHAZADA, REQUIERE_CORRECCION) como una clase con sus transiciones permitidas, porque `cambiarEstado` hoy acepta cualquier cambio (incluso APROBADA → PENDIENTE).
+- **Por qué se descartó:** la especificación no define reglas de transición ni comportamiento propio por estado; el estado es solo un dato que viaja a los observadores. Crear cuatro clases para un enum sin comportamiento viola YAGNI y no pasa el test de explicabilidad: no se puede decir qué *varía* por estado. Hoy lo suficiente es el `enum`.
+- **Señal para reconsiderar:** que Finanzas defina un flujo con transiciones válidas o acciones distintas por estado (p. ej. «una solicitud APROBADA ya no se puede rechazar», «REQUIERE_CORRECCION reabre el plazo»). Con dos o tres reglas de transición reales, State o una tabla de transiciones se justifica.
+
+### 4. Carga diferida de las pendientes con `Supplier` (propio)
+- **Qué se consideró:** al analizar el orden de la cadena (decisión 1) se vio que el servicio consulta las pendientes a la base de datos *aunque* la solicitud se rechace antes de llegar a `ValidadorDuplicados`. Se evaluó pasar un `Supplier<List<SolicitudReembolso>>` para que la consulta ocurra solo si el eslabón se ejecuta.
+- **Por qué se descartó:** cambiaría el contrato de todos los validadores (`validarPropio` recibiría un proveedor aunque dos de tres no lo usen) para ahorrar una consulta por empleado y estado, de bajo costo. No hay una medida real de latencia que muestre el problema; optimizar sin medición es especulación (YAGNI).
+- **Señal para reconsiderar:** una medición que muestre esa consulta como cuello de botella, o un cuarto validador caro que también necesite datos externos (Rule of Three sobre «validador que necesita datos costosos»).
+
+### 5. Topes de categoría centralizados y configurables (propio)
+- **Qué se consideró:** hoy el tope aparece en dos lugares (`ValidadorMontoMaximo` y la calculadora de cada categoría) y las constantes están en el código. Se evaluó exponer el tope desde `CalculadoraReembolso` o moverlo a `@ConfigurationProperties`.
+- **Por qué se descartó:** son tres categorías con topes estables que Finanzas no ha pedido cambiar sin despliegue; centralizar ahora acoplaría `validacion` con `calculo` o añadiría una capa de configuración sin un cambio real que la exija. La duplicación de constantes es una deuda conocida y pequeña.
+- **Señal para reconsiderar:** agregar la cuarta categoría («bienestar»), que ya exigiría tocar el validador además de crear su calculadora, o un pedido de Finanzas de cambiar topes sin redesplegar.
+
 ## Cómo ejecutar
 
 ```bash
